@@ -18,6 +18,7 @@ SIR Toscana ──fetch──> parser ──> alert engine ──> Telegram (can
 - Manda un'allerta **solo quando cambia qualcosa** (supera la soglia di guardia/allarme, o sale in fretta): niente spam.
 - Le allerte sono **azionabili**: non "codice arancione" ma "Bisenzio sopra guardia, evita i sottopassi".
 - Una volta al giorno manda un bollettino con lo stato di tutti i fiumi (notifica silenziosa).
+- Ogni ~15 min controlla anche la pagina "Emergenze in corso" della **Protezione Civile di Prato** e inoltra al canale **solo quando il messaggio cambia** (es. dichiarazione di allerta CFR); il colore dell'icona ufficiale diventa l'emoji di gravità.
 
 ## Struttura
 
@@ -29,10 +30,12 @@ emergenze/
   alert_engine.py    # logica soglie/rateo edge-triggered + messaggi
   supabase_store.py  # serie temporale + stato (via REST)
   telegram_notify.py # invio al canale
+  pc_prato.py        # monitor pagina Protezione Civile Prato (fetch+parse)
   run_poll.py        # entrypoint polling
   run_bollettino.py  # entrypoint bollettino
-tests/test_parser.py # test offline (5/5 verdi)
-.github/workflows/   # cron poll + bollettino
+  run_pc_prato.py    # entrypoint monitor Protezione Civile (edge-triggered)
+tests/               # test offline parser SIR + parser PC (10/10 verdi)
+.github/workflows/   # cron poll + bollettino + pc_prato
 ```
 
 ## Setup (una volta)

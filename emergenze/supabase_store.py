@@ -69,3 +69,30 @@ def upsert_stato(righe: list[dict]) -> None:
         timeout=_TIMEOUT,
     )
     r.raise_for_status()
+
+
+# --- Stato pagina Protezione Civile Prato (riga singola, chiave='prato') ---
+
+def get_pc_stato() -> dict:
+    """Ultimo stato noto della pagina PC. {} se mai salvato."""
+    r = requests.get(
+        _rest("em_pc_stato?chiave=eq.prato&select=*"),
+        headers=_headers(),
+        timeout=_TIMEOUT,
+    )
+    r.raise_for_status()
+    rows = r.json()
+    return rows[0] if rows else {}
+
+
+def upsert_pc_stato(hash_: str, testo: str, colore: str) -> None:
+    """Salva (merge su 'chiave') l'ultimo stato visto della pagina PC."""
+    r = requests.post(
+        _rest("em_pc_stato"),
+        headers=_headers(
+            {"Prefer": "resolution=merge-duplicates,return=minimal"}
+        ),
+        json=[{"chiave": "prato", "hash": hash_, "testo": testo, "colore": colore}],
+        timeout=_TIMEOUT,
+    )
+    r.raise_for_status()
