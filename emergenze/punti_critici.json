@@ -1,0 +1,50 @@
+{
+  "_nota": "Layer 'azionabile': per ogni stazione, significato delle soglie e punti critici a valle (sottopassi, strade allagabili). I punti vanno verificati/completati col Piano di Protezione Civile del Comune di Prato e georeferenziati. Le soglie effettive arrivano dal dato live SIR (campi sg1/sg2); qui c'e' solo la loro INTERPRETAZIONE.",
+  "TOS01004779": {
+    "etichetta": "Bisenzio a Gamberame (monte)",
+    "ruolo": "stazione di preavviso: l'onda di piena passa di qui PRIMA di arrivare in citta'",
+    "soglia1_significato": "guardia",
+    "soglia2_significato": "allarme",
+    "azioni_soglia1": "Bisenzio in crescita a monte. Tempo stimato all'arrivo a Prato citta': ~1-2 h (da tarare). Tieni d'occhio.",
+    "azioni_soglia2": "Onda di piena importante in arrivo verso Prato. Allontanati da argini e aree golenali.",
+    "punti": []
+  },
+  "TOS01004782": {
+    "etichetta": "Bisenzio a Prato (citta')",
+    "ruolo": "stazione di riferimento per la citta'",
+    "soglia1_significato": "guardia",
+    "soglia2_significato": "allarme",
+    "azioni_soglia1": "Non sostare in locali interrati/seminterrati. Non parcheggiare lungo il fiume.",
+    "azioni_soglia2": "NON entrare nei sottopassi. Allontanati dai piani interrati. Sali ai piani alti se in zona allagabile.",
+    "punti": [
+      {"nome": "Sottopassi cittadini di Prato", "tipo": "sottopasso", "azione": "Punto critico storico n.1: mai entrare col semaforo/segnale rosso, rischio annegamento in auto."}
+    ]
+  },
+  "TOS01004791": {
+    "etichetta": "Bisenzio a S. Piero a Ponti (valle)",
+    "ruolo": "stazione di valle (FI): conferma il deflusso verso Campi Bisenzio",
+    "soglia1_significato": "guardia",
+    "soglia2_significato": "allarme",
+    "azioni_soglia1": "Deflusso a valle in aumento. Rilevante per Campi Bisenzio.",
+    "azioni_soglia2": "Criticita' a valle: aree di Campi Bisenzio a rischio.",
+    "punti": []
+  },
+  "TOS01004875": {
+    "etichetta": "Ombrone PT a Poggio a Caiano",
+    "ruolo": "Ombrone pratese, valle",
+    "soglia1_significato": "guardia",
+    "soglia2_significato": "allarme",
+    "azioni_soglia1": "Ombrone in crescita. Attenzione nelle zone golenali.",
+    "azioni_soglia2": "Ombrone in allarme: allontanati dalle aree perifluviali.",
+    "punti": []
+  },
+  "TOS15004865": {
+    "etichetta": "Ombrone PT - Cassa di Ponte alle Vanne",
+    "ruolo": "cassa di espansione: invaso che lamina la piena",
+    "soglia1_significato": "riempimento",
+    "soglia2_significato": "prossima saturazione",
+    "azioni_soglia1": "La cassa sta lavorando (si sta riempiendo).",
+    "azioni_soglia2": "Cassa verso saturazione: ridotta capacita' di laminazione a valle.",
+    "punti": []
+  }
+}
