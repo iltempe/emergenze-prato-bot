@@ -55,7 +55,7 @@ def _msg_allerta(l: Lettura, stato: str) -> str:
         f"{_EMOJI[stato]} <b>ALLERTA {sig.upper()}</b> — {et}\n"
         f"Livello <b>{liv}</b> (soglia {sig} {soglia_s}), {_trend(l.ratei[0])}.\n"
         + (f"\n{azioni}\n" if azioni else "")
-        + f"\n🕒 aggiornato {l.timestamp}\n{config.DISCLAIMER}"
+        + f"\n🕒 aggiornato {l.timestamp}\n{config.DISCLAIMER}\n\n{config.FONTE_SIR}"
     )
 
 
@@ -67,7 +67,7 @@ def _msg_rapido(l: Lettura) -> str:
         f"⚡ <b>SALITA RAPIDA</b> — {et}\n"
         f"Livello ancora sotto soglia ({liv}) ma sta salendo in fretta "
         f"({l.ratei[0]:+.2f} m/intervallo). Tieni d'occhio.\n"
-        f"\n🕒 aggiornato {l.timestamp}\n{config.DISCLAIMER}"
+        f"\n🕒 aggiornato {l.timestamp}\n{config.DISCLAIMER}\n\n{config.FONTE_SIR}"
     )
 
 
@@ -78,7 +78,7 @@ def _msg_rientro(l: Lettura) -> str:
     return (
         f"🟢 <b>RIENTRO</b> — {et}\n"
         f"Livello tornato sotto soglia ({liv}). Situazione in normalizzazione.\n"
-        f"🕒 aggiornato {l.timestamp}"
+        f"🕒 aggiornato {l.timestamp}\n\n{config.FONTE_SIR}"
     )
 
 

@@ -55,6 +55,12 @@ DISCLAIMER = (
     "Uso indicativo: in emergenza segui sempre le indicazioni della Protezione Civile."
 )
 
+# Fonte dei dati idrometrici, da citare in coda ai messaggi sui fiumi.
+FONTE_SIR = (
+    "🔗 Fonte: SIR Toscana\n"
+    "https://www.sir.toscana.it/monitoraggio/stazioni.php?type=idro"
+)
+
 # --- Layer punti critici ---
 with open(_HERE / "punti_critici.json", encoding="utf-8") as f:
     PUNTI_CRITICI: dict = json.load(f)

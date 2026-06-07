@@ -40,6 +40,8 @@ def costruisci_bollettino(letture: list[Lettura]) -> str:
         righe.append("✅ Tutti i corsi d'acqua sotto le soglie di guardia.")
     righe.append("")
     righe.append(config.DISCLAIMER)
+    righe.append("")
+    righe.append(config.FONTE_SIR)
     return "\n".join(righe)
 
 
