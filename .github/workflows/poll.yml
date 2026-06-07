@@ -1,3 +1,4 @@
+# Polling idrometrico SIR Toscana ogni 15 min: valuta soglie e invia allerte.
 name: poll-idrometria
 
 on:
