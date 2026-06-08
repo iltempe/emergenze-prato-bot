@@ -62,7 +62,13 @@ La pipeline gira come Edge Function `emergenze` (Deno/TypeScript), schedulata da
 - **`emergenze-tick`** — `*/5 * * * *`: poll SIR (allerte) + monitor Protezione Civile.
 - **`emergenze-bollettino`** — `0 6 * * *`: bollettino giornaliero (08:00 IT).
 
-I cron chiamano la funzione via `pg_net`, autenticandosi con la `service_role` key salvata nel **Vault**. Le credenziali Telegram stanno nella tabella `em_config` (RLS, solo service_role). Deploy della funzione: vedi `supabase/functions/emergenze/index.ts`.
+I cron chiamano la funzione via `pg_net`, autenticandosi con la `service_role` key salvata nel **Vault**. Le credenziali Telegram stanno nella tabella `em_config` (RLS, solo service_role).
+
+**Redeploy** dopo aver modificato `supabase/functions/emergenze/index.ts`:
+```bash
+./scripts/deploy.sh
+```
+Richiede la Supabase CLI (`brew install supabase/tap/supabase`) e l'autenticazione (`supabase login` o `SUPABASE_ACCESS_TOKEN`). Lo script pubblica la funzione e fa uno smoke test `mode=tick`.
 
 Invocazione manuale (test):
 ```bash
