@@ -1,24 +1,21 @@
 #!/usr/bin/env bash
 #
-# Redeploy della Edge Function "emergenze" su Supabase.
+# Redeploy della Edge Function "emergenze" su Supabase via Management API.
+# Non richiede la Supabase CLI: usa curl + un Personal Access Token.
 #
-# QUANDO USARLO: ogni volta che modifichi supabase/functions/emergenze/index.ts
-# (soglie, messaggi, logica) e vuoi pubblicare la nuova versione in produzione.
+# QUANDO USARLO: ogni volta che modifichi supabase/functions/emergenze/index.ts.
 #
 # USO:
 #   ./scripts/deploy.sh
 #
-# REQUISITI (una tantum):
-#   1. Supabase CLI installato:
-#        macOS:   brew install supabase/tap/supabase
-#        altri:   https://supabase.com/docs/guides/cli
-#   2. Autenticazione, in UNO di questi modi:
-#        - una tantum:  supabase login
-#        - oppure esporta un token:  export SUPABASE_ACCESS_TOKEN="sbp_..."
-#          (lo crei in Dashboard -> Account -> Access Tokens)
+# REQUISITI:
+#   - In .env (gitignorato) deve esserci:
+#        SUPABASE_ACCESS_TOKEN=sbp_...   (Dashboard -> Account -> Access Tokens)
+#     oppure esportalo in ambiente prima di lanciare lo script.
+#   - Per lo smoke test servono anche SUPABASE_URL e SUPABASE_SERVICE_KEY (in .env).
 #
 # Variabili opzionali:
-#   SUPABASE_PROJECT_REF   ref del progetto (default: pfzfegfaagzeupopqaqj)
+#   SUPABASE_PROJECT_REF   ref progetto (default: pfzfegfaagzeupopqaqj)
 #   SKIP_SMOKE=1           salta lo smoke test post-deploy
 #
 set -euo pipefail
@@ -26,39 +23,42 @@ set -euo pipefail
 PROJECT_REF="${SUPABASE_PROJECT_REF:-pfzfegfaagzeupopqaqj}"
 FUNC="emergenze"
 
-# Vai sempre alla root del repo (lo script puo' essere lanciato da ovunque)
 cd "$(dirname "$0")/.."
 
-# --- Pre-check: CLI presente? ---
-if ! command -v supabase >/dev/null 2>&1; then
-  echo "✗ Supabase CLI non trovato." >&2
-  echo "  Installa con:  brew install supabase/tap/supabase" >&2
-  echo "  (oppure vedi https://supabase.com/docs/guides/cli)" >&2
-  exit 1
-fi
-
-# --- Pre-check: file della funzione presente? ---
-ENTRY="supabase/functions/${FUNC}/index.ts"
-if [ ! -f "$ENTRY" ]; then
-  echo "✗ Non trovo $ENTRY (sei nella repo giusta?)." >&2
-  exit 1
-fi
-
-# --- Deploy ---
-# verify_jwt resta TRUE (default): la funzione viene invocata dai cron con la
-# service_role key nell'header Authorization, quindi NON va resa pubblica.
-echo "→ Deploy di '${FUNC}' sul progetto ${PROJECT_REF} ..."
-supabase functions deploy "$FUNC" --project-ref "$PROJECT_REF"
-echo "✓ Deploy completato."
-
-# --- Smoke test opzionale (mode=tick): conferma che la funzione risponde 200 ---
-# Richiede SUPABASE_URL e SUPABASE_SERVICE_KEY (presi da .env se presente).
-if [ "${SKIP_SMOKE:-0}" = "1" ]; then
-  exit 0
-fi
+# Carica .env (per token, url, service key)
 if [ -f .env ]; then
   set -a; . ./.env; set +a
 fi
+
+if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+  echo "✗ Manca SUPABASE_ACCESS_TOKEN (in .env o in ambiente)." >&2
+  echo "  Crealo in: Dashboard Supabase -> Account -> Access Tokens" >&2
+  exit 1
+fi
+
+ENTRY="supabase/functions/${FUNC}/index.ts"
+[ -f "$ENTRY" ] || { echo "✗ Non trovo $ENTRY" >&2; exit 1; }
+
+echo "→ Deploy di '${FUNC}' (progetto ${PROJECT_REF}) via Management API ..."
+RESP=$(curl -s -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/functions/deploy?slug=${FUNC}" \
+  -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+  -F 'metadata={"name":"'"${FUNC}"'","entrypoint_path":"index.ts","verify_jwt":true};type=application/json' \
+  -F "file=@${ENTRY};type=application/typescript")
+
+VER=$(printf '%s' "$RESP" | python3 -c "import sys,json
+try:
+    d=json.load(sys.stdin); print(d.get('version','') if d.get('status')=='ACTIVE' else '')
+except Exception: print('')")
+
+if [ -z "$VER" ]; then
+  echo "✗ Deploy fallito. Risposta:" >&2
+  echo "$RESP" | head -c 800 >&2; echo >&2
+  exit 1
+fi
+echo "✓ Deploy ok — versione ${VER} ACTIVE."
+
+# --- Smoke test (mode=tick) ---
+if [ "${SKIP_SMOKE:-0}" = "1" ]; then exit 0; fi
 if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_SERVICE_KEY:-}" ]; then
   echo "→ Smoke test (mode=tick)..."
   code=$(curl -s -o /tmp/emergenze_smoke.json -w "%{http_code}" \
@@ -66,11 +66,7 @@ if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_SERVICE_KEY:-}" ]; then
     -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
     -H "Content-Type: application/json" -d '{}' || true)
   echo "  HTTP ${code}: $(cat /tmp/emergenze_smoke.json 2>/dev/null)"
-  if [ "$code" = "200" ]; then
-    echo "✓ Smoke test ok."
-  else
-    echo "⚠ Smoke test non 200 — controlla i log: supabase functions logs ${FUNC} --project-ref ${PROJECT_REF}" >&2
-  fi
+  [ "$code" = "200" ] && echo "✓ Smoke test ok." || echo "⚠ Smoke test non 200 — controlla i log nel dashboard." >&2
 else
-  echo "ℹ Smoke test saltato (manca SUPABASE_URL/SUPABASE_SERVICE_KEY in .env)."
+  echo "ℹ Smoke test saltato (manca SUPABASE_URL/SUPABASE_SERVICE_KEY)."
 fi

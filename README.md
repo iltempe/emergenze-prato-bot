@@ -19,6 +19,7 @@ SIR Toscana ──fetch──> parser ──> alert engine ──> Telegram (can
 - Le allerte sono **azionabili**: non "codice arancione" ma "Bisenzio sopra guardia, evita i sottopassi".
 - Una volta al giorno manda un bollettino con lo stato di tutti i fiumi (notifica silenziosa).
 - Ogni ~15 min controlla anche la pagina "Emergenze in corso" della **Protezione Civile di Prato** e inoltra al canale **solo quando il messaggio cambia** (es. dichiarazione di allerta CFR); il colore dell'icona ufficiale diventa l'emoji di gravità.
+- Ogni 5 min controlla i **terremoti INGV** entro 30 km da Prato (soglia M ≥ 2.0) e invia un avviso per ogni nuovo evento, con magnitudo, distanza, profondità e link alla scheda INGV.
 
 ## Struttura
 
@@ -68,7 +69,7 @@ I cron chiamano la funzione via `pg_net`, autenticandosi con la `service_role` k
 ```bash
 ./scripts/deploy.sh
 ```
-Richiede la Supabase CLI (`brew install supabase/tap/supabase`) e l'autenticazione (`supabase login` o `SUPABASE_ACCESS_TOKEN`). Lo script pubblica la funzione e fa uno smoke test `mode=tick`.
+Usa la Management API (curl, niente CLI): serve `SUPABASE_ACCESS_TOKEN` in `.env` (Dashboard → Account → Access Tokens). Lo script pubblica la funzione e fa uno smoke test `mode=tick`.
 
 Invocazione manuale (test):
 ```bash

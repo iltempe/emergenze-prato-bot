@@ -366,6 +366,77 @@ function costruisciBollettino(letture: Lettura[]): string {
 }
 
 // ===========================================================================
+// SISMI INGV (terremoti.ingv.it — web service FDSN)
+// ===========================================================================
+const PRATO_LAT = 43.8777, PRATO_LON = 11.0955;
+const SISMA_RAGGIO_KM = 30;
+const SISMA_MAG_MIN = 2.0;            // soglia scelta: M >= 2.0
+const SISMA_WINDOW_MIN = 180;         // finestra di query a ogni tick (resilienza ritardi/down)
+const INGV_BASE = "https://webservices.ingv.it/fdsnws/event/1/query";
+
+interface Sisma {
+  event_id: number; ts: string; mag: number | null; mag_type: string | null;
+  profondita_km: number | null; luogo: string | null;
+  lat: number; lon: number; distanza_km: number;
+}
+
+function haversineKm(la1: number, lo1: number, la2: number, lo2: number): number {
+  const R = 6371, toR = (x: number) => (x * Math.PI) / 180;
+  const dLa = toR(la2 - la1), dLo = toR(lo2 - lo1);
+  const a = Math.sin(dLa / 2) ** 2 + Math.cos(toR(la1)) * Math.cos(toR(la2)) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+async function ingvQuery(startIsoUtc: string): Promise<any[]> {
+  const url = `${INGV_BASE}?starttime=${startIsoUtc}` +
+    `&latitude=${PRATO_LAT}&longitude=${PRATO_LON}&maxradiuskm=${SISMA_RAGGIO_KM}` +
+    `&minmagnitude=${SISMA_MAG_MIN}&format=geojson&orderby=time`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": "EmergenzePrato-monitor/0.3 (+progetto allerta Prato)" } });
+    if (r.status === 204) return []; // INGV: 204 No Content = nessun evento
+    if (!r.ok) throw new Error(`INGV ${r.status}`);
+    const txt = await r.text();
+    if (!txt.trim()) return [];
+    return (JSON.parse(txt).features ?? []);
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function sismaTimeRome(tsUtc: string): string {
+  const d = new Date(tsUtc.endsWith("Z") ? tsUtc : tsUtc + "Z");
+  return new Intl.DateTimeFormat("it-IT", { timeZone: "Europe/Rome", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(d).replace(",", "");
+}
+function sismaHeader(mag: number | null): string {
+  if (mag !== null && mag >= 4) return "🔴 <b>Terremoto forte vicino a Prato</b>";
+  if (mag !== null && mag >= 3) return "🟠 <b>Terremoto vicino a Prato</b>";
+  return "🟡 <b>Terremoto vicino a Prato</b>";
+}
+function sismaMessaggio(s: Sisma): string {
+  const magS = s.mag !== null ? `${s.mag_type ?? "M"} ${s.mag.toFixed(1)}` : "magnitudo n.d.";
+  const prof = s.profondita_km !== null ? `Profondità: ${s.profondita_km.toFixed(0)} km\n` : "";
+  return (
+    `${sismaHeader(s.mag)}\n` +
+    `Magnitudo <b>${magS}</b> — ${s.distanza_km.toFixed(0)} km da Prato\n` +
+    `📍 ${s.luogo ?? "località n.d."}\n` +
+    `🕒 ${sismaTimeRome(s.ts)} (ora italiana)\n` +
+    prof +
+    `\n🔗 Fonte: INGV\nhttps://terremoti.ingv.it/event/${s.event_id}`
+  );
+}
+function featureToSisma(f: any): Sisma {
+  const [lon, lat, depth] = f.geometry.coordinates;
+  return {
+    event_id: f.properties.eventId, ts: f.properties.time,
+    mag: f.properties.mag ?? null, mag_type: f.properties.magType ?? null,
+    profondita_km: depth ?? null, luogo: f.properties.place ?? null,
+    lat, lon, distanza_km: Math.round(haversineKm(PRATO_LAT, PRATO_LON, lat, lon) * 10) / 10,
+  };
+}
+
+// ===========================================================================
 // TELEGRAM + STORAGE
 // ===========================================================================
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -416,6 +487,27 @@ async function runPc(cfg: { token: string; chatId: string }): Promise<string> {
   return "PC: aggiornamento inviato";
 }
 
+async function runSismi(cfg: { token: string; chatId: string }, opts: { seed?: boolean; days?: number } = {}): Promise<string> {
+  const start = opts.seed
+    ? new Date(Date.now() - (opts.days ?? 90) * 86400000)
+    : new Date(Date.now() - SISMA_WINDOW_MIN * 60000);
+  const features = await ingvQuery(start.toISOString().slice(0, 19));
+  if (!features.length) return "Sismi: nessun evento nella finestra";
+  const sismi = features.filter((f) => f?.properties?.eventId != null).map(featureToSisma);
+  const ids = sismi.map((s) => s.event_id);
+  const { data: known } = await db.from("em_sismi").select("event_id").in("event_id", ids);
+  const knownSet = new Set((known ?? []).map((r) => r.event_id));
+  const nuovi = sismi.filter((s) => !knownSet.has(s.event_id));
+  if (!nuovi.length) return "Sismi: nessuna novità";
+  // In modalità seed si popola solo lo storico (niente invii). Altrimenti si notifica.
+  if (!opts.seed) {
+    // dal più vecchio al più recente, così l'ordine in chat è cronologico
+    for (const s of [...nuovi].reverse()) await telegramInvia(cfg.token, cfg.chatId, sismaMessaggio(s), false);
+  }
+  await db.from("em_sismi").upsert(nuovi, { onConflict: "event_id" });
+  return `Sismi: ${opts.seed ? "seed" : "inviati"} ${nuovi.length}`;
+}
+
 async function runBollettino(cfg: { token: string; chatId: string }): Promise<string> {
   const letture = parsePayload(await sirFetchRaw(), true);
   if (!letture.length) return "Bollettino: nessuna lettura";
@@ -438,10 +530,14 @@ Deno.serve(async (req) => {
     const cfg = await getConfig();
     if (mode === "bollettino") {
       out.bollettino = await runBollettino(cfg);
+    } else if (mode === "sismi_seed") {
+      // Una tantum: popola lo storico INGV senza inviare nulla (evita blast iniziale).
+      out.sismi = await runSismi(cfg, { seed: true, days: 90 });
     } else {
-      // tick: i due controlli sono indipendenti (uno non deve bloccare l'altro)
+      // tick: i controlli sono indipendenti (uno non deve bloccare l'altro)
       try { out.sir = await runSir(cfg); } catch (e) { out.sir = `ERRORE: ${e instanceof Error ? e.message : e}`; }
       try { out.pc = await runPc(cfg); } catch (e) { out.pc = `ERRORE: ${e instanceof Error ? e.message : e}`; }
+      try { out.sismi = await runSismi(cfg); } catch (e) { out.sismi = `ERRORE: ${e instanceof Error ? e.message : e}`; }
     }
     out.ok = true;
   } catch (e) {
