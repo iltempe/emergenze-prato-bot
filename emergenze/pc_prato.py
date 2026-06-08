@@ -82,22 +82,31 @@ def _clean(s: str) -> str:
 
 
 def parse(html_text: str) -> Optional[StatoPC]:
-    """Estrae il blocco di stato. Ritorna None se la struttura non e' trovata
-    (cambio impaginazione): meglio non inviare nulla che inviare spazzatura."""
+    """Estrae il blocco di stato ufficiale. Ritorna None (= non inviare nulla)
+    se la struttura attesa non c'e': cambio impaginazione, oppure una pagina di
+    errore/blocco del server (es. WAF Imunify360). Meglio niente che spazzatura.
+
+    Requisiti minimi per considerare valida la pagina:
+      1) presenza del contenitore <... id="regola_default">
+      2) presenza dell'icona-cerchio di stato con un colore (fa-circle + color)
+    Entrambi mancano nelle pagine di errore/interstiziali."""
     idx = html_text.find('id="regola_default"')
-    blocco = html_text[idx: idx + 3000] if idx >= 0 else html_text
+    if idx < 0:
+        return None  # contenitore di stato assente -> pagina non valida
+    blocco = html_text[idx: idx + 3000]
 
     cm = re.search(
         r'fa-circle[^>]*style="[^"]*color:\s*([a-zA-Z]+)', blocco, re.IGNORECASE
     )
-    colore = cm.group(1).lower() if cm else "sconosciuto"
+    if cm is None:
+        return None  # nessuna icona di stato colorata -> contenuto non valido
+    colore = cm.group(1).lower()
 
     sm = re.search(r"<span[^>]*>(.*?)</span>", blocco, re.IGNORECASE | re.DOTALL)
-    grezzo = sm.group(1) if sm else None
-    if grezzo is None:
+    if sm is None:
         return None
 
-    testo = _clean(grezzo)
+    testo = _clean(sm.group(1))
     if not testo:
         return None
 

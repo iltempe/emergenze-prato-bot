@@ -41,9 +41,12 @@ def main(argv: list[str]) -> int:
 
     st = pc_prato.get_stato_pc()
     if not st:
-        print("Stato PC non estraibile (struttura pagina cambiata?) — esco.",
-              file=sys.stderr)
-        return 1
+        # Pagina non valida in questo momento: tipicamente un blocco temporaneo
+        # del server (WAF Imunify360) o una pagina di errore. NON è un errore
+        # nostro e NON va inviato nulla: skip silenzioso (exit 0, niente run rosso).
+        print("Stato PC non estraibile ora (pagina di errore/WAF?) — salto, "
+              "nessun invio.", file=sys.stderr)
+        return 0
 
     nuovo_hash = _hash(st)
     print(f"PC Prato: [{st.colore}] {st.testo[:80]}... hash={nuovo_hash[:12]}")

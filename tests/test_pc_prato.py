@@ -29,6 +29,19 @@ HTML_ALLERTA = (
 
 HTML_ROTTO = "<html><body>nessun blocco di stato qui</body></html>"
 
+# Pagina di blocco/errore del server (WAF Imunify360): NON deve produrre invii.
+# Ha uno <span> ma manca il contenitore di stato e l'icona colorata.
+HTML_IMUNIFY360 = (
+    "<html><head><title>Access denied</title></head><body>"
+    '<div class="error"><span>Powered by Imunify360</span></div>'
+    "</body></html>"
+)
+
+# Caso subdolo: c'è il contenitore ma manca l'icona-cerchio colorata -> non valido.
+HTML_SENZA_ICONA = (
+    '<div id="regola_default"><div><span>Testo a caso senza icona</span></div></div>'
+)
+
 
 def test_parse_normalita():
     st = pc_prato.parse(HTML_NORMALITA)
@@ -66,6 +79,15 @@ def test_cambio_stato_cambia_la_chiave():
 
 def test_struttura_mancante_ritorna_none():
     assert pc_prato.parse(HTML_ROTTO) is None
+
+
+def test_pagina_imunify360_non_invia():
+    # Regressione: la pagina di blocco WAF non deve essere scambiata per stato.
+    assert pc_prato.parse(HTML_IMUNIFY360) is None
+
+
+def test_contenitore_senza_icona_non_invia():
+    assert pc_prato.parse(HTML_SENZA_ICONA) is None
 
 
 def _run():
