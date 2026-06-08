@@ -4,7 +4,7 @@ Sistema che legge i livelli dei fiumi pratesi dal **SIR Toscana** in tempo reale
 li valuta contro le soglie e li traduce in **allerte azionabili** su un **canale Telegram**,
 così il cittadino è sempre informato. Più un **bollettino giornaliero** di riepilogo.
 
-Gira su **GitHub Actions** (cron, nessun hardware acceso) e usa **Supabase** per lo stato.
+Gira interamente su **Supabase** (Edge Function schedulata con **pg_cron**, nessun hardware acceso e timing affidabile) e usa Supabase anche per lo stato. Il codice Python resta come riferimento/strumento locale; la versione in produzione è la Edge Function `supabase/functions/emergenze`.
 
 ```
 SIR Toscana ──fetch──> parser ──> alert engine ──> Telegram (canale)
@@ -35,7 +35,7 @@ emergenze/
   run_bollettino.py  # entrypoint bollettino
   run_pc_prato.py    # entrypoint monitor Protezione Civile (edge-triggered)
 tests/               # test offline parser SIR + parser PC (10/10 verdi)
-.github/workflows/   # cron poll + bollettino + pc_prato
+supabase/functions/emergenze/index.ts  # PRODUZIONE: port TS di tutta la pipeline (Edge Function)
 ```
 
 ## Setup (una volta)
@@ -57,11 +57,21 @@ Il bot esiste già: **@emergenzeprato_bot**. Il token lo recuperi da **@BotFathe
 - `SUPABASE_URL`: `https://pfzfegfaagzeupopqaqj.supabase.co`
 - `SUPABASE_SERVICE_KEY`: Dashboard → Project Settings → API → **service_role** (segreto, solo lato server).
 
-### 3. Secrets su GitHub
-Nel repo: *Settings → Secrets and variables → Actions → New repository secret*. Aggiungi:
-`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+### 3. Produzione: Edge Function + pg_cron (su Supabase)
+La pipeline gira come Edge Function `emergenze` (Deno/TypeScript), schedulata da **pg_cron** con timing affidabile (≤5 min reali, adatto alle emergenze):
+- **`emergenze-tick`** — `*/5 * * * *`: poll SIR (allerte) + monitor Protezione Civile.
+- **`emergenze-bollettino`** — `0 6 * * *`: bollettino giornaliero (08:00 IT).
 
-I due workflow (`poll.yml`, `bollettino.yml`) partono da soli col cron; puoi anche lanciarli a mano da *Actions → Run workflow*.
+I cron chiamano la funzione via `pg_net`, autenticandosi con la `service_role` key salvata nel **Vault**. Le credenziali Telegram stanno nella tabella `em_config` (RLS, solo service_role). Deploy della funzione: vedi `supabase/functions/emergenze/index.ts`.
+
+Invocazione manuale (test):
+```bash
+curl -X POST "$SUPABASE_URL/functions/v1/emergenze?mode=tick" \
+  -H "Authorization: Bearer $SUPABASE_SERVICE_KEY"
+# mode=bollettino per il riepilogo
+```
+
+> Nota: i vecchi workflow GitHub Actions sono stati ritirati (il cron di GitHub è best-effort e non garantiva la puntualità richiesta in emergenza).
 
 ## Test in locale
 
