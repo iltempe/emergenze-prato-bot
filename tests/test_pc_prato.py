@@ -50,7 +50,7 @@ def test_parse_normalita():
     assert st.is_normalita is True
     assert st.emoji == "🟢"
     assert "\x00" not in st.testo          # null byte ripulito
-    assert "Stato di normalit" in st.testo
+    assert "Stato di normalità" in st.testo  # 'à' ripristinata dal byte nullo
 
 
 def test_parse_allerta():

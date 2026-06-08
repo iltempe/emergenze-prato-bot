@@ -75,7 +75,10 @@ def _clean(s: str) -> str:
     pagina contiene perfino dei null byte) e normalizza gli spazi."""
     s = re.sub(r"<[^>]+>", " ", s)
     s = html.unescape(s)
-    s = s.replace("\x00", "")
+    # La pagina serve un byte nullo al posto del carattere accentato (es. la 'à'
+    # di "normalità"): lo ripristiniamo come 'à', l'accento di gran lunga piu'
+    # probabile in questo contesto (normalità, criticità, attività...).
+    s = s.replace("\x00", "à")
     s = "".join(ch for ch in s if ch >= " " or ch == "\n")
     s = re.sub(r"\s+", " ", s)
     return s.strip()
