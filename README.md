@@ -20,6 +20,11 @@ SIR Toscana ──fetch──> parser ──> alert engine ──> Telegram (can
 - Una volta al giorno manda un bollettino con lo stato di tutti i fiumi (notifica silenziosa).
 - Ogni ~15 min controlla anche la pagina "Emergenze in corso" della **Protezione Civile di Prato** e inoltra al canale **solo quando il messaggio cambia** (es. dichiarazione di allerta CFR); il colore dell'icona ufficiale diventa l'emoji di gravità.
 - Ogni 5 min controlla i **terremoti INGV** entro 30 km da Prato (soglia M ≥ 2.0) e invia un avviso per ogni nuovo evento, con magnitudo, distanza, profondità e link alla scheda INGV.
+- Integra altre fonti, **salvando sempre il dato su Supabase prima di inviarlo**:
+  - **DPC / allertameteo.app** — codice colore allerta (oggi/domani) per Prato → messaggio quando l'allerta non è verde.
+  - **Open-Meteo (previsione)** — pioggia oraria → push solo su pioggia estrema prevista; sempre nel bollettino.
+  - **Open-Meteo Flood / GloFAS (previsione)** — portata fluviale prevista → push solo su forte aumento; sempre nel bollettino.
+- Le fonti sono **riconfigurabili** dalla tabella `em_fonti` (cambi un link/endpoint senza ridepoiare). I messaggi **etichettano sempre** se il dato è 🔭 *previsione* o 📡 *osservato*, con la fonte e l'ora del dato. Soglie dei push in `em_config`, tunabili senza redeploy.
 
 ## Struttura
 

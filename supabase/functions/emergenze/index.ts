@@ -135,15 +135,16 @@ function toFloat(val: string | undefined): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
-async function sirFetchRaw(): Promise<string> {
-  const r1 = await fetchText(`${SIR_BASE}?type=idro`);
-  const m = r1.match(/stazioni\.php\?type=idro&(?:amp;)?extra=([A-Za-z0-9]+)/);
+async function sirFetchRaw(url: string): Promise<string> {
+  const r1 = await fetchText(url);
+  const m = r1.match(/stazioni\.php\?type=[a-z]+&(?:amp;)?extra=([A-Za-z0-9]+)/);
   if (!m) {
-    if (r1.includes("new Array") || r1.includes("Array(")) return r1;
+    if (r1.includes("Array(")) return r1;
     throw new Error("Hash 'extra' non trovato e nessun array inline: struttura SIR cambiata?");
   }
-  return await fetchText(`${SIR_BASE}?type=idro&extra=${m[1]}`);
+  return await fetchText(`${url}&extra=${m[1]}`);
 }
+const SIR_IDRO_URL = "https://www.sir.toscana.it/monitoraggio/stazioni.php?type=idro";
 
 function splitRecords(text: string): string[][] {
   const records: string[][] = [];
@@ -343,7 +344,7 @@ function nowRome(): string {
   const f = new Intl.DateTimeFormat("it-IT", { timeZone: "Europe/Rome", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
   return f.format(new Date()).replace(",", "");
 }
-function costruisciBollettino(letture: Lettura[]): string {
+function costruisciBollettino(letture: Lettura[], extra = ""): string {
   const righe = [`📋 <b>Bollettino fiumi Prato</b> — ${nowRome()}`, ""];
   letture.sort((a, b) => {
     if (a.fiume !== b.fiume) return a.fiume < b.fiume ? -1 : 1;
@@ -358,6 +359,7 @@ function costruisciBollettino(letture: Lettura[]): string {
   const inAllerta = letture.filter((l) => statoDaLivello(l) !== "calma");
   righe.push("");
   righe.push(inAllerta.length ? "⚠️ Alcune stazioni sono sopra soglia: vedi sopra." : "✅ Tutti i corsi d'acqua sotto le soglie di guardia.");
+  if (extra) { righe.push(""); righe.push("— <i>Previsioni e allerte</i> —"); righe.push(extra); }
   righe.push("");
   righe.push(DISCLAIMER);
   righe.push("");
@@ -387,8 +389,8 @@ function haversineKm(la1: number, lo1: number, la2: number, lo2: number): number
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-async function ingvQuery(startIsoUtc: string): Promise<any[]> {
-  const url = `${INGV_BASE}?starttime=${startIsoUtc}` +
+async function ingvQuery(base: string, startIsoUtc: string): Promise<any[]> {
+  const url = `${base}?starttime=${startIsoUtc}` +
     `&latitude=${PRATO_LAT}&longitude=${PRATO_LON}&maxradiuskm=${SISMA_RAGGIO_KM}` +
     `&minmagnitude=${SISMA_MAG_MIN}&format=geojson&orderby=time`;
   const ctrl = new AbortController();
@@ -443,13 +445,51 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
-async function getConfig(): Promise<{ token: string; chatId: string }> {
-  const { data, error } = await db.from("em_config").select("chiave,valore").in("chiave", ["telegram_bot_token", "telegram_chat_id"]);
-  if (error) throw error;
-  const map: Record<string, string> = {};
-  for (const r of data ?? []) map[r.chiave] = r.valore;
-  if (!map.telegram_bot_token || !map.telegram_chat_id) throw new Error("Config Telegram mancante in em_config");
-  return { token: map.telegram_bot_token, chatId: map.telegram_chat_id };
+// Contesto: credenziali Telegram + config (soglie) + registry fonti (url riconfigurabili).
+interface Ctx {
+  token: string; chatId: string;
+  conf: Record<string, string>;
+  fonti: Record<string, { url: string; attiva: boolean; tipo: string; nome: string }>;
+}
+async function getCtx(): Promise<Ctx> {
+  const [confRes, fontiRes] = await Promise.all([
+    db.from("em_config").select("chiave,valore"),
+    db.from("em_fonti").select("chiave,url,attiva,tipo,nome"),
+  ]);
+  const conf: Record<string, string> = {};
+  for (const r of confRes.data ?? []) conf[r.chiave] = r.valore;
+  const fonti: Record<string, any> = {};
+  for (const r of fontiRes.data ?? []) fonti[r.chiave] = r;
+  if (!conf.telegram_bot_token || !conf.telegram_chat_id) throw new Error("Config Telegram mancante in em_config");
+  return { token: conf.telegram_bot_token, chatId: conf.telegram_chat_id, conf, fonti };
+}
+function fonteUrl(cfg: Ctx, chiave: string, fallback: string): string {
+  return cfg.fonti[chiave]?.url ?? fallback;
+}
+function fonteAttiva(cfg: Ctx, chiave: string): boolean {
+  const f = cfg.fonti[chiave];
+  return f ? f.attiva !== false : true;
+}
+// Etichetta "previsione/osservato/allerta" + nome fonte + ora del dato.
+function fonteTag(cfg: Ctx, chiave: string, oraDato?: string): string {
+  const f = cfg.fonti[chiave];
+  const nome = f?.nome ?? chiave;
+  const badge = f?.tipo === "previsione" ? "🔭 <i>Previsione</i>"
+    : f?.tipo === "allerta" ? "🚨 <i>Allerta ufficiale</i>"
+    : "📡 <i>Dato osservato</i>";
+  return `${badge} · Fonte: ${nome}${oraDato ? ` · dati ${oraDato}` : ""}`;
+}
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+// Dedup dei push "estremi" (meteo/flood): true se la firma è cambiata.
+async function pushCambiato(chiave: string, firma: string): Promise<boolean> {
+  const h = await sha256Hex(firma);
+  const { data } = await db.from("em_push").select("hash").eq("chiave", chiave).maybeSingle();
+  if (data?.hash === h) return false;
+  await db.from("em_push").upsert({ chiave, hash: h }, { onConflict: "chiave" });
+  return true;
 }
 async function telegramInvia(token: string, chatId: string, testo: string, silenzioso = false): Promise<void> {
   const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -463,35 +503,46 @@ async function telegramInvia(token: string, chatId: string, testo: string, silen
 // ===========================================================================
 // JOBS
 // ===========================================================================
-async function runSir(cfg: { token: string; chatId: string }): Promise<string> {
-  const letture = parsePayload(await sirFetchRaw(), true);
+// --- util ---
+const UA = "EmergenzePrato-monitor/0.4 (+progetto allerta Prato)";
+const PC_URL_DEFAULT = PC_URL;
+const METEO_URL_DEFAULT = "https://api.open-meteo.com/v1/forecast?latitude=43.8805&longitude=11.097&hourly=precipitation_probability,precipitation,rain,showers,snowfall,snow_depth,cloud_cover_high,cloud_cover_mid,wind_speed_180m,wind_speed_120m,wind_speed_80m&timezone=Europe%2FBerlin";
+const FLOOD_URL_DEFAULT = "https://flood-api.open-meteo.com/v1/flood?latitude=43.8805&longitude=11.097&daily=river_discharge,river_discharge_mean,river_discharge_median,river_discharge_max,river_discharge_min,river_discharge_p25,river_discharge_p75&ensemble=true";
+const DPC_URL_DEFAULT = "https://allertameteo.app/api/alert/Prato";
+const DPC_EMOJI: Record<string, string> = { verde: "🟢", giallo: "🟡", arancione: "🟠", rosso: "🔴" };
+const num = (s: string | undefined, d: number) => { const n = Number(s); return Number.isFinite(n) ? n : d; };
+const round1 = (x: number | null | undefined) => (x == null ? 0 : Math.round(x * 10) / 10);
+const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+async function runSir(cfg: Ctx): Promise<string> {
+  const letture = parsePayload(await sirFetchRaw(fonteUrl(cfg, "sir_idro", SIR_IDRO_URL)), true);
   if (!letture.length) return "SIR: nessuna lettura";
   const { data: statoRows } = await db.from("em_stato").select("*");
   const statoPrec: Record<string, any> = {};
   for (const r of statoRows ?? []) statoPrec[r.codice] = r;
   const { messaggi, nuovoStato } = valuta(letture, statoPrec);
-  await db.from("em_letture").insert(rigaLettureDb(letture));
+  await db.from("em_letture").insert(rigaLettureDb(letture)); // STORE FIRST
   for (const m of messaggi) await telegramInvia(cfg.token, cfg.chatId, m, false);
   await db.from("em_stato").upsert(nuovoStato, { onConflict: "codice" });
   return `SIR: ${letture.length} letture, ${messaggi.length} allerte`;
 }
 
-async function runPc(cfg: { token: string; chatId: string }): Promise<string> {
-  const st = parsePc(await fetchText(PC_URL));
+async function runPc(cfg: Ctx): Promise<string> {
+  const st = parsePc(await fetchText(fonteUrl(cfg, "pc_prato", PC_URL_DEFAULT)));
   if (!st) return "PC: pagina non valida (errore/WAF) — skip";
   const h = await pcHash(st);
   const { data } = await db.from("em_pc_stato").select("hash").eq("chiave", "prato").maybeSingle();
   if (data?.hash === h) return "PC: nessuna variazione";
+  await db.from("em_pc_stato").upsert({ chiave: "prato", hash: h, testo: st.testo, colore: st.colore }, { onConflict: "chiave" }); // STORE FIRST
   await telegramInvia(cfg.token, cfg.chatId, pcMessaggio(st), pcIsNormalita(st.colore));
-  await db.from("em_pc_stato").upsert({ chiave: "prato", hash: h, testo: st.testo, colore: st.colore }, { onConflict: "chiave" });
   return "PC: aggiornamento inviato";
 }
 
-async function runSismi(cfg: { token: string; chatId: string }, opts: { seed?: boolean; days?: number } = {}): Promise<string> {
+async function runSismi(cfg: Ctx, opts: { seed?: boolean; days?: number } = {}): Promise<string> {
   const start = opts.seed
     ? new Date(Date.now() - (opts.days ?? 90) * 86400000)
     : new Date(Date.now() - SISMA_WINDOW_MIN * 60000);
-  const features = await ingvQuery(start.toISOString().slice(0, 19));
+  const features = await ingvQuery(fonteUrl(cfg, "ingv", INGV_BASE), start.toISOString().slice(0, 19));
   if (!features.length) return "Sismi: nessun evento nella finestra";
   const sismi = features.filter((f) => f?.properties?.eventId != null).map(featureToSisma);
   const ids = sismi.map((s) => s.event_id);
@@ -499,19 +550,143 @@ async function runSismi(cfg: { token: string; chatId: string }, opts: { seed?: b
   const knownSet = new Set((known ?? []).map((r) => r.event_id));
   const nuovi = sismi.filter((s) => !knownSet.has(s.event_id));
   if (!nuovi.length) return "Sismi: nessuna novità";
-  // In modalità seed si popola solo lo storico (niente invii). Altrimenti si notifica.
+  await db.from("em_sismi").upsert(nuovi, { onConflict: "event_id" }); // STORE FIRST
   if (!opts.seed) {
-    // dal più vecchio al più recente, così l'ordine in chat è cronologico
     for (const s of [...nuovi].reverse()) await telegramInvia(cfg.token, cfg.chatId, sismaMessaggio(s), false);
   }
-  await db.from("em_sismi").upsert(nuovi, { onConflict: "event_id" });
   return `Sismi: ${opts.seed ? "seed" : "inviati"} ${nuovi.length}`;
 }
 
-async function runBollettino(cfg: { token: string; chatId: string }): Promise<string> {
-  const letture = parsePayload(await sirFetchRaw(), true);
+// --- DPC allerta colore (allertameteo.app) ---
+async function fetchDpc(cfg: Ctx): Promise<any | null> {
+  const r = await fetch(fonteUrl(cfg, "dpc_allerta", DPC_URL_DEFAULT), { headers: { "User-Agent": UA } });
+  if (!r.ok) throw new Error(`DPC ${r.status}`);
+  const d = (await r.json())?.data;
+  if (!d?.oggi?.allerta) return null;
+  return {
+    dataBoll: d.bulletin_info?.data_bollettino ?? "", oraBoll: d.bulletin_info?.ora_bollettino ?? "",
+    oggi: d.oggi.allerta, domani: d.domani?.allerta ?? {},
+    dettagli_oggi: d.oggi.dettagli, dettagli_domani: d.domani?.dettagli, info: d.bulletin_info,
+  };
+}
+function dpcMessaggio(cfg: Ctx, d: any): string {
+  const e = (c: string) => DPC_EMOJI[(c || "").toLowerCase()] ?? "⚪";
+  const det = d.dettagli_oggi || {};
+  return [
+    `🚨 <b>Allerta Protezione Civile — Prato</b>`,
+    `<b>Oggi</b>: ${e(d.oggi.colore)} ${cap(d.oggi.colore)} — ${d.oggi.descrizione}`,
+    `<b>Domani</b>: ${e(d.domani.colore)} ${cap(d.domani.colore)} — ${d.domani.descrizione ?? "n.d."}`,
+    ``,
+    `• Idraulico: ${det.idraulico ?? "n.d."}`,
+    `• Temporali: ${det.temporali ?? "n.d."}`,
+    `• Idrogeologico: ${det.idrogeologico ?? "n.d."}`,
+    ``,
+    fonteTag(cfg, "dpc_allerta", `boll. ${d.dataBoll} ${d.oraBoll}`.trim()),
+  ].join("\n");
+}
+async function runDpc(cfg: Ctx): Promise<string> {
+  if (!fonteAttiva(cfg, "dpc_allerta")) return "DPC: disattivata";
+  const d = await fetchDpc(cfg);
+  if (!d) return "DPC: dati non disponibili";
+  const hash = await sha256Hex(`${d.dataBoll}|${d.oggi.colore}|${d.oggi.livello}|${d.domani.colore}|${d.domani.livello}`);
+  const { error } = await db.from("em_allerta_dpc").insert({ // STORE FIRST (unique hash = dedup)
+    hash, data_bollettino: d.dataBoll, colore_oggi: d.oggi.colore, livello_oggi: d.oggi.livello,
+    colore_domani: d.domani.colore, livello_domani: d.domani.livello,
+    dettagli: { oggi: d.dettagli_oggi, domani: d.dettagli_domani, info: d.info },
+  });
+  if (error) return "DPC: nessuna variazione";
+  const allerta = (d.oggi.livello ?? 1) >= 2 || (d.domani.livello ?? 1) >= 2;
+  if (!allerta) return "DPC: salvato (nessuna allerta)";
+  await telegramInvia(cfg.token, cfg.chatId, dpcMessaggio(cfg, d), false);
+  return "DPC: allerta inviata";
+}
+
+// --- Meteo previsione (Open-Meteo) ---
+async function fetchMeteo(cfg: Ctx): Promise<any | null> {
+  const r = await fetch(fonteUrl(cfg, "meteo", METEO_URL_DEFAULT));
+  if (!r.ok) throw new Error(`Meteo ${r.status}`);
+  const j = await r.json(); const h = j.hourly;
+  if (!h?.time) return null;
+  const pref = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false }).format(new Date()).replace(" ", "T").slice(0, 13);
+  let idx = h.time.findIndex((t: string) => t.slice(0, 13) === pref);
+  if (idx < 0) idx = 0;
+  const end = Math.min(idx + 12, h.time.length);
+  let somma = 0, probMax = 0, peak = 0;
+  for (let i = idx; i < end; i++) {
+    const p = h.precipitation?.[i] ?? 0; somma += p; peak = Math.max(peak, p);
+    probMax = Math.max(probMax, h.precipitation_probability?.[i] ?? 0);
+  }
+  return { oraRif: pref, pioggia12h: round1(somma), probMax12h: probMax, peakMmOra: round1(peak), payload: { da: h.time[idx], a: h.time[end - 1], hourly: h } };
+}
+function meteoMessaggio(cfg: Ctx, m: any): string {
+  return [
+    `⛈️ <b>Pioggia forte prevista — Prato</b>`,
+    `Prossime 12h: <b>${m.pioggia12h} mm</b> totali · picco <b>${m.peakMmOra} mm/h</b> · prob. max ${m.probMax12h}%`,
+    ``,
+    fonteTag(cfg, "meteo", `agg. ${m.oraRif.replace("T", " ")}`),
+  ].join("\n");
+}
+async function runMeteo(cfg: Ctx): Promise<string> {
+  if (!fonteAttiva(cfg, "meteo")) return "Meteo: disattivata";
+  const m = await fetchMeteo(cfg);
+  if (!m) return "Meteo: dati non disponibili";
+  await db.from("em_meteo").upsert( // STORE FIRST (uno snapshot per ora)
+    { ora_riferimento: m.oraRif, pioggia_12h_mm: m.pioggia12h, prob_max_12h: m.probMax12h, payload: m.payload },
+    { onConflict: "ora_riferimento", ignoreDuplicates: true },
+  );
+  const estremo = (m.peakMmOra >= num(cfg.conf.meteo_push_mm_ora, 15) || m.pioggia12h >= num(cfg.conf.meteo_push_mm_12h, 40))
+    && m.probMax12h >= num(cfg.conf.meteo_push_prob_min, 70);
+  if (!estremo) return `Meteo: salvato (12h ${m.pioggia12h}mm, picco ${m.peakMmOra}mm/h)`;
+  if (!(await pushCambiato("meteo", `${m.oraRif}|${m.peakMmOra}|${m.pioggia12h}`))) return "Meteo: estremo già notificato";
+  await telegramInvia(cfg.token, cfg.chatId, meteoMessaggio(cfg, m), false);
+  return "Meteo: avviso pioggia inviato";
+}
+
+// --- Portata fluviale prevista (Open-Meteo Flood / GloFAS) ---
+async function fetchFlood(cfg: Ctx): Promise<any | null> {
+  const r = await fetch(fonteUrl(cfg, "flood", FLOOD_URL_DEFAULT));
+  if (!r.ok) throw new Error(`Flood ${r.status}`);
+  const d = (await r.json())?.daily;
+  if (!d?.time) return null;
+  const disc = d.river_discharge ?? [];
+  const maxArr = d.river_discharge_max ?? disc;
+  const medArr = d.river_discharge_median ?? disc;
+  const max7 = Math.max(...maxArr.slice(0, 7).filter((x: number) => x != null), 0);
+  return { giorno: d.time[0], oggi: disc[0] ?? null, max7g: max7, median: medArr[0] ?? null, payload: { time: d.time.slice(0, 10), river_discharge: disc.slice(0, 10), max: maxArr.slice(0, 10), median: medArr.slice(0, 10) } };
+}
+function floodMessaggio(cfg: Ctx, f: any): string {
+  return [
+    `🌊 <b>Portata fiume in forte aumento (previsione)</b> — Prato`,
+    `Oggi ~${round1(f.oggi)} m³/s · max prossimi 7g <b>${round1(f.max7g)} m³/s</b> (mediana ${round1(f.median)})`,
+    `⚠️ Modello globale ~5 km: indicativo per bacini piccoli. Verifica col dato SIR locale.`,
+    ``,
+    fonteTag(cfg, "flood", `agg. ${f.giorno}`),
+  ].join("\n");
+}
+async function runFlood(cfg: Ctx): Promise<string> {
+  if (!fonteAttiva(cfg, "flood")) return "Flood: disattivata";
+  const f = await fetchFlood(cfg);
+  if (!f) return "Flood: dati non disponibili";
+  await db.from("em_flood").upsert( // STORE FIRST (uno snapshot al giorno)
+    { giorno: f.giorno, discharge_oggi: f.oggi, discharge_max_7g: f.max7g, discharge_median: f.median, payload: f.payload },
+    { onConflict: "giorno", ignoreDuplicates: true },
+  );
+  const base = Math.max(f.median ?? 0, 0.1);
+  const estremo = f.max7g >= num(cfg.conf.flood_push_discharge, 20) || f.max7g >= num(cfg.conf.flood_push_ratio, 8) * base;
+  if (!estremo) return `Flood: salvato (oggi ${round1(f.oggi)} m³/s, max7g ${round1(f.max7g)})`;
+  if (!(await pushCambiato("flood", `${f.giorno}|${round1(f.max7g)}`))) return "Flood: estremo già notificato";
+  await telegramInvia(cfg.token, cfg.chatId, floodMessaggio(cfg, f), false);
+  return "Flood: avviso portata inviato";
+}
+
+async function runBollettino(cfg: Ctx): Promise<string> {
+  const letture = parsePayload(await sirFetchRaw(fonteUrl(cfg, "sir_idro", SIR_IDRO_URL)), true);
   if (!letture.length) return "Bollettino: nessuna lettura";
-  await telegramInvia(cfg.token, cfg.chatId, costruisciBollettino(letture), true);
+  let extra = "";
+  try { const d = await fetchDpc(cfg); if (d) extra += `🚨 <b>Allerta DPC</b>: oggi ${DPC_EMOJI[(d.oggi.colore || "").toLowerCase()] ?? "⚪"} ${cap(d.oggi.colore)}, domani ${DPC_EMOJI[(d.domani.colore || "").toLowerCase()] ?? "⚪"} ${cap(d.domani.colore)}\n`; } catch { /* opzionale */ }
+  try { const m = await fetchMeteo(cfg); if (m) extra += `🔭 <b>Pioggia prevista 12h</b>: ${m.pioggia12h} mm (picco ${m.peakMmOra} mm/h, prob ${m.probMax12h}%)\n`; } catch { /* opzionale */ }
+  try { const fl = await fetchFlood(cfg); if (fl) extra += `🔭 <b>Portata prevista</b>: oggi ~${round1(fl.oggi)} m³/s, max 7g ${round1(fl.max7g)} m³/s\n`; } catch { /* opzionale */ }
+  await telegramInvia(cfg.token, cfg.chatId, costruisciBollettino(letture, extra.trim()), true);
   return "Bollettino inviato";
 }
 
@@ -527,17 +702,20 @@ Deno.serve(async (req) => {
 
   const out: Record<string, unknown> = { mode };
   try {
-    const cfg = await getConfig();
+    const cfg = await getCtx();
     if (mode === "bollettino") {
       out.bollettino = await runBollettino(cfg);
     } else if (mode === "sismi_seed") {
       // Una tantum: popola lo storico INGV senza inviare nulla (evita blast iniziale).
       out.sismi = await runSismi(cfg, { seed: true, days: 90 });
     } else {
-      // tick: i controlli sono indipendenti (uno non deve bloccare l'altro)
+      // tick: ogni fonte è indipendente (una che fallisce non blocca le altre)
       try { out.sir = await runSir(cfg); } catch (e) { out.sir = `ERRORE: ${e instanceof Error ? e.message : e}`; }
       try { out.pc = await runPc(cfg); } catch (e) { out.pc = `ERRORE: ${e instanceof Error ? e.message : e}`; }
       try { out.sismi = await runSismi(cfg); } catch (e) { out.sismi = `ERRORE: ${e instanceof Error ? e.message : e}`; }
+      try { out.dpc = await runDpc(cfg); } catch (e) { out.dpc = `ERRORE: ${e instanceof Error ? e.message : e}`; }
+      try { out.meteo = await runMeteo(cfg); } catch (e) { out.meteo = `ERRORE: ${e instanceof Error ? e.message : e}`; }
+      try { out.flood = await runFlood(cfg); } catch (e) { out.flood = `ERRORE: ${e instanceof Error ? e.message : e}`; }
     }
     out.ok = true;
   } catch (e) {
