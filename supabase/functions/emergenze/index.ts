@@ -679,6 +679,70 @@ async function runFlood(cfg: Ctx): Promise<string> {
   return "Flood: avviso portata inviato";
 }
 
+// --- LaMMA: previsione settimanale (XML comuni_web) ---
+const LAMMA_URL_DEFAULT = "https://www.lamma.toscana.it/previ/ita/xml/comuni_web/dati/prato.xml";
+function lammaEmoji(d: string): string {
+  const s = (d || "").toLowerCase();
+  if (s.includes("temporale")) return "⛈️";
+  if (s.includes("pioggia") || s.includes("rovesc") || s.includes("pioviggine")) return s.includes("schiarit") ? "🌦️" : "🌧️";
+  if (s.includes("neve")) return "❄️";
+  if (s.includes("nebbia")) return "🌫️";
+  if (s.includes("coperto")) return "☁️";
+  if (s.includes("nuvolos")) return "⛅";
+  if (s.includes("sereno")) return "☀️";
+  if (s.includes("variabile")) return "🌤️";
+  return "🌡️";
+}
+function parseLamma(xml: string): { aggiornamento: string; giorni: any[] } {
+  const aggiornamento = xml.match(/<aggiornamento>(.*?)<\/aggiornamento>/)?.[1] ?? "";
+  const giorni: any[] = [];
+  const re = /<previsione idday="\d+" ora="giorno" datadescr="([^"]*)">([\s\S]*?)<\/previsione>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) {
+    const body = m[2];
+    const rischi: string[] = [];
+    for (const r of body.matchAll(/<rischio descr="([^"]*)"[^>]*value="([^"]*)"/g)) {
+      if (r[2] && r[2] !== "nessuno") rischi.push(`${r[1]}: ${r[2]}`);
+    }
+    giorni.push({
+      giorno: m[1],
+      cielo: body.match(/<simbolo descr="([^"]*)"/)?.[1] ?? "",
+      tmin: body.match(/<temp temp_type="min">([^<]*)<\/temp>/)?.[1] ?? "",
+      tmax: body.match(/<temp temp_type="max">([^<]*)<\/temp>/)?.[1] ?? "",
+      prob: body.match(/<prob_rain>([^<]*)<\/prob_rain>/)?.[1] ?? "",
+      rischi,
+      allerta: body.match(/<allerta[^>]*value="([^"]*)"/)?.[1] ?? "nessuno",
+    });
+  }
+  return { aggiornamento, giorni };
+}
+function lammaMessaggio(cfg: Ctx, data: any): string {
+  const righe = ["🗓️ <b>Meteo settimana — Prato</b>", ""];
+  for (const g of data.giorni) {
+    const t = g.tmin && g.tmax ? ` ${g.tmin}–${g.tmax}°C` : "";
+    const p = g.prob ? ` · pioggia ${g.prob}%` : "";
+    let line = `${lammaEmoji(g.cielo)} <b>${g.giorno}</b>: ${g.cielo}${t}${p}`;
+    if (g.allerta && g.allerta !== "nessuno") line += ` ⚠️ allerta ${g.allerta}`;
+    else if (g.rischi.length) line += ` ⚠️ ${g.rischi.join(", ")}`;
+    righe.push(line);
+  }
+  righe.push("");
+  righe.push(fonteTag(cfg, "lamma", `agg. ${data.aggiornamento}`));
+  return righe.join("\n");
+}
+async function fetchLamma(cfg: Ctx): Promise<any | null> {
+  const data = parseLamma(await fetchText(fonteUrl(cfg, "lamma", LAMMA_URL_DEFAULT)));
+  return data.giorni.length ? data : null;
+}
+async function runLammaSettimana(cfg: Ctx): Promise<string> {
+  if (!fonteAttiva(cfg, "lamma")) return "LaMMA: disattivata";
+  const data = await fetchLamma(cfg);
+  if (!data) return "LaMMA: dati non disponibili";
+  await db.from("em_lamma").insert({ aggiornamento: data.aggiornamento, giorni: data.giorni }); // STORE FIRST
+  await telegramInvia(cfg.token, cfg.chatId, lammaMessaggio(cfg, data), true); // settimanale informativo: silenzioso
+  return `LaMMA: settimana inviata (${data.giorni.length} giorni)`;
+}
+
 async function runBollettino(cfg: Ctx): Promise<string> {
   const letture = parsePayload(await sirFetchRaw(fonteUrl(cfg, "sir_idro", SIR_IDRO_URL)), true);
   if (!letture.length) return "Bollettino: nessuna lettura";
@@ -708,6 +772,9 @@ Deno.serve(async (req) => {
     } else if (mode === "sismi_seed") {
       // Una tantum: popola lo storico INGV senza inviare nulla (evita blast iniziale).
       out.sismi = await runSismi(cfg, { seed: true, days: 90 });
+    } else if (mode === "meteo_settimana") {
+      // Settimanale (domenica): previsione 5 giorni LaMMA.
+      out.lamma = await runLammaSettimana(cfg);
     } else {
       // tick: ogni fonte è indipendente (una che fallisce non blocca le altre)
       try { out.sir = await runSir(cfg); } catch (e) { out.sir = `ERRORE: ${e instanceof Error ? e.message : e}`; }

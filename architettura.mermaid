@@ -1,0 +1,30 @@
+flowchart TD
+    subgraph FONTI["🌐 Fonti dati pubbliche · tempo reale"]
+        SIR["🌊 Livelli fiumi<br/>SIR Toscana"]
+        METEO["🌧️ Meteo & piena<br/>Open-Meteo · GloFAS"]
+        DPC["📋 Allerte ufficiali<br/>DPC · allertameteo"]
+        PC["🏛️ Protezione Civile<br/>Comune di Prato"]
+        INGV["🌍 Terremoti<br/>INGV"]
+    end
+
+    CRON["⏱️ pg_cron — ogni 5 min"]
+
+    subgraph ENGINE["⚙️ Motore EmergenzePrato · Supabase Edge Function"]
+        S1["1 · Raccoglie e normalizza i dati"]
+        S2["2 · Valuta soglie e velocità di salita"]
+        S3["3 · Decide se è una vera novità → niente spam"]
+        S1 --> S2 --> S3
+    end
+
+    DB[("🗄️ Supabase DB<br/>storico letture · stato · config fonti")]
+
+    BOT["📲 Bot Telegram"]
+    CANALE["📢 Canale EmergenzePrato"]
+    CITT["👥 Cittadini di Prato"]
+
+    FONTI --> ENGINE
+    CRON --> ENGINE
+    ENGINE <--> DB
+    ENGINE --> BOT --> CANALE --> CITT
+
+    %% Ogni messaggio etichetta il dato: 🔭 previsione / 📡 osservato, con fonte e ora.
