@@ -679,6 +679,39 @@ async function runFlood(cfg: Ctx): Promise<string> {
   return "Flood: avviso portata inviato";
 }
 
+// --- SIR pluviometri a monte del Bisenzio (base nowcasting) ---
+const SIR_PLUVIO_URL = "https://www.sir.toscana.it/monitoraggio/stazioni.php?type=pluvio";
+// Gavigno, Vernio, Cantagallo, Cottede, Fattoria Iavello, Vaiano (alta Val di Bisenzio)
+const PLUVIO_MONTE = new Set(["TOS01001161", "TOS01001171", "TOS01001151", "TOS30290100", "TOS01001273", "TOS11000503"]);
+function parsePluvio(text: string): any[] {
+  const out: any[] = [];
+  for (const rec of splitRecords(text)) {
+    if (!PLUVIO_MONTE.has(rec[0])) continue;
+    const vals = rec.slice(4, 11).map((v) => toFloat(v.replace(/<[^>]+>/g, "")));
+    const nums = vals.filter((x): x is number => x != null);
+    out.push({ codice: rec[0], nome: rec[1], quota: toFloat(rec[17]), cumulate: vals, ts: rec[11], maxMm: nums.length ? Math.max(...nums) : 0 });
+  }
+  return out;
+}
+function pluvioMessaggio(cfg: Ctx, sopra: any[]): string {
+  const righe = ["🌧️ <b>Pioggia intensa a monte del Bisenzio</b>", "Possibile onda di piena verso Prato nelle prossime ore — tieni d'occhio i livelli.", ""];
+  for (const s of sopra) righe.push(`• ${s.nome}: ${round1(s.maxMm)} mm (cumulata recente)`);
+  righe.push("");
+  righe.push(fonteTag(cfg, "sir_pluvio", `agg. ${sopra[0]?.ts ?? ""}`));
+  return righe.join("\n");
+}
+async function runPluvio(cfg: Ctx): Promise<string> {
+  if (!fonteAttiva(cfg, "sir_pluvio")) return "Pluvio: disattivata";
+  const staz = parsePluvio(await sirFetchRaw(fonteUrl(cfg, "sir_pluvio", SIR_PLUVIO_URL)));
+  if (!staz.length) return "Pluvio: nessuna stazione monte";
+  await db.from("em_pluvio").insert(staz.map((s) => ({ codice: s.codice, nome: s.nome, quota_m: s.quota, cumulate: s.cumulate, max_mm: s.maxMm, ts_sir: s.ts }))); // STORE FIRST
+  const sopra = staz.filter((s) => s.maxMm >= num(cfg.conf.pluvio_push_mm, 40));
+  if (!sopra.length) return `Pluvio: salvato (${staz.length} staz, max ${round1(Math.max(...staz.map((s) => s.maxMm)))}mm)`;
+  if (!(await pushCambiato("pluvio", sopra.map((s) => `${s.codice}:${round1(s.maxMm)}`).sort().join("|")))) return "Pluvio: estremo già notificato";
+  await telegramInvia(cfg.token, cfg.chatId, pluvioMessaggio(cfg, sopra), false);
+  return "Pluvio: avviso pioggia monte inviato";
+}
+
 // --- LaMMA: previsione settimanale (XML comuni_web) ---
 const LAMMA_URL_DEFAULT = "https://www.lamma.toscana.it/previ/ita/xml/comuni_web/dati/prato.xml";
 function lammaEmoji(d: string): string {
@@ -783,6 +816,7 @@ Deno.serve(async (req) => {
       try { out.dpc = await runDpc(cfg); } catch (e) { out.dpc = `ERRORE: ${e instanceof Error ? e.message : e}`; }
       try { out.meteo = await runMeteo(cfg); } catch (e) { out.meteo = `ERRORE: ${e instanceof Error ? e.message : e}`; }
       try { out.flood = await runFlood(cfg); } catch (e) { out.flood = `ERRORE: ${e instanceof Error ? e.message : e}`; }
+      try { out.pluvio = await runPluvio(cfg); } catch (e) { out.pluvio = `ERRORE: ${e instanceof Error ? e.message : e}`; }
     }
     out.ok = true;
   } catch (e) {

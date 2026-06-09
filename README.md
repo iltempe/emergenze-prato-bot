@@ -24,6 +24,7 @@ SIR Toscana ──fetch──> parser ──> alert engine ──> Telegram (can
   - **DPC / allertameteo.app** — codice colore allerta (oggi/domani) per Prato → messaggio quando l'allerta non è verde.
   - **Open-Meteo (previsione)** — pioggia oraria → push solo su pioggia estrema prevista; sempre nel bollettino.
   - **Open-Meteo Flood / GloFAS (previsione)** — portata fluviale prevista → push solo su forte aumento; sempre nel bollettino.
+- Ogni 5 min salva la **pioggia dei pluviometri SIR a monte del Bisenzio** (Gavigno, Vernio, Cantagallo, Cottede, Iavello, Vaiano) in `em_pluvio` — base del **nowcasting** dell'onda di piena; push se la pioggia a monte supera la soglia.
 - **Ogni domenica** manda la **previsione settimanale (5 giorni)** da **LaMMA** (XML località Toscana): cielo, temperature min/max, pioggia e rischi per Prato.
 - Le fonti sono **riconfigurabili** dalla tabella `em_fonti` (cambi un link/endpoint senza ridepoiare). I messaggi **etichettano sempre** se il dato è 🔭 *previsione* o 📡 *osservato*, con la fonte e l'ora del dato. Soglie dei push in `em_config`, tunabili senza redeploy.
 
