@@ -623,6 +623,7 @@ function dpcMessaggio(cfg: Ctx, d: any): string {
     `• Temporali: ${det.temporali ?? "n.d."}`,
     `• Idrogeologico: ${det.idrogeologico ?? "n.d."}`,
     ``,
+    ...(d.info && d.info.link_pdf ? [`📄 <a href="${d.info.link_pdf}">Bollettino di criticità DPC</a>`] : []),
     fonteTag(cfg, "dpc_allerta", `boll. ${d.dataBoll} ${d.oraBoll}`.trim()),
   ].join("\n");
 }
