@@ -18,6 +18,7 @@ const DATASETS: Record<string, { desc: string; order: string }> = {
   em_sismi:       { desc: "Terremoti INGV entro 30 km da Prato (M>=2.0)", order: "ts" },
   em_allerta_dpc: { desc: "Allerta colore DPC (oggi/domani) per Prato", order: "inserito_il" },
   em_pc_stato:    { desc: "Stato pagina Emergenze Protezione Civile Prato", order: "aggiornato_il" },
+  em_pc_bollettini:{ desc: "Archivio bollettini Protezione Civile Prato durante le allerte", order: "inserito_il" },
   em_meteo:       { desc: "Snapshot previsione meteo oraria (Open-Meteo)", order: "inserito_il" },
   em_flood:       { desc: "Snapshot portata fluviale prevista (Open-Meteo/GloFAS)", order: "inserito_il" },
   em_lamma:       { desc: "Previsione settimanale LaMMA per Prato", order: "inserito_il" },

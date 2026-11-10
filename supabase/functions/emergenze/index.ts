@@ -343,6 +343,18 @@ function parsePc(htmlText: string): StatoPC | null {
   if (!testo) return null;
   return { colore, testo, messaggioNorm: testo.replace(RE_PREFISSO, "").trim().toLowerCase() };
 }
+// Testo COMPLETO del bollettino (contenuto di regola_default / ZONA INCLUSA centro) per l'archivio.
+function parsePcFull(htmlText: string): string | null {
+  const idx = htmlText.indexOf('id="regola_default"');
+  if (idx < 0) return null;
+  const gt = htmlText.indexOf(">", idx);
+  const from = gt >= 0 ? gt + 1 : idx;
+  let end = htmlText.indexOf("<!-- fine richiamo di un oggetto", from);
+  if (end < 0) end = htmlText.indexOf("<!-- fine ZONA INCLUSA centro", from);
+  if (end < 0) end = from + 8000;
+  const t = cleanPc(htmlText.slice(from, end));
+  return t && t.length > 10 ? t.slice(0, 4000) : null;
+}
 function pcEmoji(colore: string): string { return PC_EMOJI[colore.toLowerCase()] ?? "ℹ️"; }
 function pcIsNormalita(colore: string): boolean { return ["green", "lime"].includes(colore.toLowerCase()); }
 async function pcHash(st: StatoPC): Promise<string> {
@@ -548,8 +560,18 @@ async function runSir(cfg: Ctx): Promise<string> {
 }
 
 async function runPc(cfg: Ctx): Promise<string> {
-  const st = parsePc(await fetchText(fonteUrl(cfg, "pc_prato", PC_URL_DEFAULT), 22000)); // sito Comune lento
+  const html = await fetchText(fonteUrl(cfg, "pc_prato", PC_URL_DEFAULT), 22000); // sito Comune lento
+  const st = parsePc(html);
   if (!st) return "PC: pagina non valida (errore/WAF) — skip";
+  // Archivio del bollettino completo durante le allerte (dedup per hash del testo)
+  if (!pcIsNormalita(st.colore)) {
+    const full = parsePcFull(html);
+    if (full) {
+      await db.from("em_pc_bollettini").upsert(
+        { hash: await sha256Hex(full), colore: st.colore, estratto: st.testo, testo: full },
+        { onConflict: "hash", ignoreDuplicates: true });
+    }
+  }
   const h = await pcHash(st);
   const { data } = await db.from("em_pc_stato").select("hash").eq("chiave", "prato").maybeSingle();
   if (data?.hash === h) return "PC: nessuna variazione";
