@@ -520,7 +520,7 @@ async function pushCambiato(chiave: string, firma: string): Promise<boolean> {
   await db.from("em_push").upsert({ chiave, hash: h }, { onConflict: "chiave" });
   return true;
 }
-const SITO = "https://iltempe.github.io/Emergenzeprato/";
+const SITO = "https://www.emergenzeprato.it/";
 async function telegramInvia(token: string, chatId: string, testo: string, silenzioso = false): Promise<void> {
   // Link al sito (e dati aperti) in coda a OGNI messaggio.
   const corpo = `${testo}\n\n🌐 <a href="${SITO}">Sito &amp; dati aperti</a>`;
