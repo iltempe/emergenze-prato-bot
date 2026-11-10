@@ -491,11 +491,14 @@ async function pushCambiato(chiave: string, firma: string): Promise<boolean> {
   await db.from("em_push").upsert({ chiave, hash: h }, { onConflict: "chiave" });
   return true;
 }
+const SITO = "https://iltempe.github.io/Emergenzeprato/";
 async function telegramInvia(token: string, chatId: string, testo: string, silenzioso = false): Promise<void> {
+  // Link al sito (e dati aperti) in coda a OGNI messaggio.
+  const corpo = `${testo}\n\n🌐 <a href="${SITO}">Sito &amp; dati aperti</a>`;
   const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: testo, parse_mode: "HTML", disable_web_page_preview: true, disable_notification: silenzioso }),
+    body: JSON.stringify({ chat_id: chatId, text: corpo, parse_mode: "HTML", disable_web_page_preview: true, disable_notification: silenzioso }),
   });
   if (!r.ok) throw new Error(`Telegram ${r.status}: ${await r.text()}`);
 }
