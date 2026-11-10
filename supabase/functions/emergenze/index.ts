@@ -22,7 +22,8 @@ const NOTIFICA_RIENTRO = true;
 
 const DISCLAIMER =
   "ℹ️ Dati SIR Toscana acquisiti in tempo reale e <b>non validati</b>. " +
-  "Uso indicativo: in emergenza segui sempre le indicazioni della Protezione Civile.";
+  "Uso indicativo: in emergenza segui sempre le indicazioni della Protezione Civile — " +
+  "consulta la <a href=\"https://emergenze.comune.prato.it/mirror_emergenze/it/pagina2413.html\">pagina Emergenze PC Prato</a>.";
 
 const FONTE_SIR =
   "🔗 Fonte: SIR Toscana\n" +
