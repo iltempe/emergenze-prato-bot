@@ -313,10 +313,27 @@ function cleanPc(s: string): string {
   s = s.replace(/\s+/g, " ");
   return s.trim();
 }
+const PC_COLORE_IT: Record<string, string> = { verde: "green", giallo: "yellow", arancione: "orange", rosso: "red" };
 function parsePc(htmlText: string): StatoPC | null {
   const idx = htmlText.indexOf('id="regola_default"');
   if (idx < 0) return null; // contenitore di stato assente -> pagina di errore/WAF
-  const blocco = htmlText.slice(idx, idx + 3000);
+  const blocco = htmlText.slice(idx, idx + 6000);
+
+  // Layout ALLERTA (prioritario): <h1>Allerta ... codice Giallo ...</h1> e/o classe editor-box-<colore>Luminoso
+  const h1 = blocco.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  const codiceM = blocco.match(/codice\s+(giallo|arancione|rosso|verde)/i)
+    || blocco.match(/editor-box-(giallo|arancione|rosso|verde)/i);
+  if (h1 && codiceM) {
+    const colore = PC_COLORE_IT[codiceM[1].toLowerCase()] ?? codiceM[1].toLowerCase();
+    let testo = cleanPc(h1[1]);
+    const p = blocco.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+    if (p) { const az = cleanPc(p[1]); if (az.length > 8) testo += " — " + az; }
+    if (testo.length > 400) testo = testo.slice(0, 397) + "…";
+    if (!testo) return null;
+    return { colore, testo, messaggioNorm: testo.replace(RE_PREFISSO, "").trim().toLowerCase() };
+  }
+
+  // Layout NORMALITÀ: icona fa-circle colorata + span
   const cm = blocco.match(/fa-circle[^>]*style="[^"]*color:\s*([a-zA-Z]+)/i);
   if (!cm) return null; // nessuna icona di stato colorata
   const colore = cm[1].toLowerCase();
@@ -324,8 +341,7 @@ function parsePc(htmlText: string): StatoPC | null {
   if (!sm) return null;
   const testo = cleanPc(sm[1]);
   if (!testo) return null;
-  const messaggioNorm = testo.replace(RE_PREFISSO, "").trim().toLowerCase();
-  return { colore, testo, messaggioNorm };
+  return { colore, testo, messaggioNorm: testo.replace(RE_PREFISSO, "").trim().toLowerCase() };
 }
 function pcEmoji(colore: string): string { return PC_EMOJI[colore.toLowerCase()] ?? "ℹ️"; }
 function pcIsNormalita(colore: string): boolean { return ["green", "lime"].includes(colore.toLowerCase()); }
