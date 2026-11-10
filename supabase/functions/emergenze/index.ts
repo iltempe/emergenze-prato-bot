@@ -531,7 +531,7 @@ async function runSir(cfg: Ctx): Promise<string> {
 }
 
 async function runPc(cfg: Ctx): Promise<string> {
-  const st = parsePc(await fetchText(fonteUrl(cfg, "pc_prato", PC_URL_DEFAULT)));
+  const st = parsePc(await fetchText(fonteUrl(cfg, "pc_prato", PC_URL_DEFAULT), 22000)); // sito Comune lento
   if (!st) return "PC: pagina non valida (errore/WAF) — skip";
   const h = await pcHash(st);
   const { data } = await db.from("em_pc_stato").select("hash").eq("chiave", "prato").maybeSingle();
