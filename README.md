@@ -112,6 +112,11 @@ Il parser è testato su dati sintetici; questi due punti vanno confermati col pr
    ufficiale SIR** e con il Piano di Protezione Civile comunale. Stessa cosa per i `punti_critici.json`:
    i sottopassi e le strade a rischio vanno completati e georeferenziati dal piano comunale.
 
+## Sito e open data
+- **Sito pubblico**: https://iltempe.github.io/Emergenzeprato/ (landing in `site/index.html`, pubblicata sul branch `gh-pages` del repo `iltempe/Emergenzeprato`).
+- **Open data** (API pubblica, sola lettura, JSON/CSV, niente chiavi): `https://pfzfegfaagzeupopqaqj.supabase.co/functions/v1/opendata`
+  Edge Function `supabase/functions/opendata` (verify_jwt=false, CORS, tabelle whitelisted — mai `em_config`). Es: `?dataset=em_sismi&format=csv&limit=500`.
+
 ## Disclaimer
 Dati SIR Toscana acquisiti in tempo reale e **non validati**. Uso civico/indicativo:
 in emergenza fa fede sempre la Protezione Civile (IT-Alert, Comune di Prato, CFR Toscana).
